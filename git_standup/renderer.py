@@ -18,9 +18,11 @@ def render_to_file(digest: str, path: Path, append: bool = False) -> None:
         path: Destination file path.
         append: If True, append to existing file instead of overwriting.
     """
-    mode = "a" if append else "w"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(digest, encoding="utf-8") if not append else _append(path, digest)
+    if append:
+        _append(path, digest)
+    else:
+        path.write_text(digest, encoding="utf-8")
 
 
 def _append(path: Path, content: str) -> None:
