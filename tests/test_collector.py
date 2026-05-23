@@ -46,6 +46,14 @@ def test_run_git_log_empty_output(mock_run, fake_repo):
 
 
 @patch("git_standup.collector.subprocess.run")
+def test_run_git_log_whitespace_only_output(mock_run, fake_repo):
+    """Lines that are blank or whitespace-only should be ignored."""
+    mock_run.return_value = _make_completed_process(stdout="\n   \n\n")
+    commits = _run_git_log(fake_repo, "alice", date(2024, 5, 20), date(2024, 5, 20))
+    assert commits == []
+
+
+@patch("git_standup.collector.subprocess.run")
 def test_collect_commits_skips_non_git_dirs(mock_run, tmp_path):
     non_git = tmp_path / "not_a_repo"
     non_git.mkdir()
