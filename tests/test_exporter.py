@@ -78,6 +78,21 @@ def test_json_includes_commit_fields(grouped):
     assert commit["message"] == "feat: add thing"
 
 
+def test_json_includes_stats_when_enabled(grouped):
+    cfg = ExportConfig(format="json", include_stats=True)
+    result = export_as_json(grouped, "total commits: 2", cfg)
+    parsed = json.loads(result)
+    assert "stats" in parsed
+    assert parsed["stats"] == "total commits: 2"
+
+
+def test_json_omits_stats_when_disabled(grouped):
+    cfg = ExportConfig(format="json", include_stats=False)
+    result = export_as_json(grouped, "total commits: 2", cfg)
+    parsed = json.loads(result)
+    assert "stats" not in parsed
+
+
 def test_export_digest_writes_file(tmp_path, grouped):
     out = tmp_path / "output" / "digest.md"
     cfg = ExportConfig(format="markdown", output_path=out, include_stats=False)
