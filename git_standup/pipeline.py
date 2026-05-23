@@ -1,74 +1,70 @@
-"""High-level pipeline: collect → format → render."""
+"""High-level pipeline that wires collector → filter → group → format → render."""
+from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
+from git_standup.cache import CacheConfig, load_cached, save_cached
 from git_standup.collector import CollectorConfig, collect_commits
+from git_standup.filters import FilterConfig, filter_commits
 from git_standup.formatter import FormatConfig, format_digest
+from git_standup.grouper import GroupConfig, group_by_date_and_repo
+from git_standup.hooks import HookConfig, fire
 from git_standup.renderer import render
 
 
 @dataclass
 class PipelineConfig:
-    """Top-level configuration combining all stages."""
-
-    # Collection
-    repo_paths: list[Path] = field(default_factory=list)
-    author: Optional[str] = None
-    since: str = "yesterday"
-    until: str = "now"
-
-    # Formatting
-    show_repo: bool = True
-    show_hash: bool = True
-    show_time: bool = False
-    group_by_repo: bool = True
-    date_header: bool = True
-
-    # Rendering
-    stdout: bool = True
-    output_file: Optional[Path] = None
-    append_to_file: bool = False
-    clipboard: bool = False
+    repos: List[Path]
+    collector: CollectorConfig = field(default_factory=CollectorConfig)
+    filters: FilterConfig = field(default_factory=FilterConfig)
+    group: GroupConfig = field(default_factory=GroupConfig)
+    format: FormatConfig = field(default_factory=FormatConfig)
+    cache: Optional[CacheConfig] = None
+    hooks: HookConfig = field(default_factory=HookConfig)
+    output: Optional[Path] = None
+    append: bool = False
+    to_clipboard: bool = False
 
 
-def run_pipeline(config: PipelineConfig) -> str:
-    """Execute the full collect → format → render pipeline.
+def run_pipeline(cfg: PipelineConfig) -> str:
+    """Execute the full standup pipeline and return the rendered digest string."""
+    try:
+        # --- collect ---
+        commits = collect_commits(cfg.repos, cfg.collector)
+        fire(cfg.hooks.on_commits_collected, commits)
 
-    Returns the formatted digest string regardless of render targets.
-    """
-    collector_cfg = CollectorConfig(
-        author=config.author,
-        since=config.since,
-        until=config.until,
-    )
+        # --- cache round-trip (optional) ---
+        if cfg.cache is not None:
+            cached = load_cached(cfg.cache, commits)
+            if cached is not None:
+                fire(cfg.hooks.on_digest_ready, cached)
+                return cached
 
-    commits = collect_commits(config.repo_paths, collector_cfg)
+        # --- filter ---
+        commits = filter_commits(commits, cfg.filters)
+        fire(cfg.hooks.on_commits_filtered, commits)
 
-    format_cfg = FormatConfig(
-        show_repo=config.show_repo,
-        show_hash=config.show_hash,
-        show_time=config.show_time,
-        group_by_repo=config.group_by_repo,
-        date_header=config.date_header,
-    )
+        # --- group → format ---
+        grouped = group_by_date_and_repo(commits, cfg.group)
+        digest = format_digest(grouped, cfg.format)
 
-    for_date: Optional[date] = None
-    if config.since == "yesterday":
-        for_date = date.today() - timedelta(days=1)
-    elif config.since == "today" or config.since == "midnight":
-        for_date = date.today()
+        # --- cache save ---
+        if cfg.cache is not None:
+            save_cached(cfg.cache, commits, digest)
 
-    digest = format_digest(commits, config=format_cfg, for_date=for_date)
+        # --- render ---
+        render(
+            digest,
+            output=cfg.output,
+            append=cfg.append,
+            to_clipboard=cfg.to_clipboard,
+        )
 
-    render(
-        digest,
-        stdout=config.stdout,
-        file_path=config.output_file,
-        append=config.append_to_file,
-        clipboard=config.clipboard,
-    )
+        fire(cfg.hooks.on_digest_ready, digest)
+        return digest
 
-    return digest
+    except Exception as exc:  # noqa: BLE001
+        fire(cfg.hooks.on_error, exc)
+        raise
