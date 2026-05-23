@@ -61,3 +61,10 @@ def test_render_clipboard_failure_writes_warning(capsys):
     with patch("git_standup.renderer.render_to_clipboard", return_value=False):
         render(DIGEST, stdout=False, clipboard=True)
     assert "warning" in capsys.readouterr().err
+
+
+def test_render_clipboard_success_no_warning(capsys):
+    """Verify that a successful clipboard copy does not emit a warning."""
+    with patch("git_standup.renderer.render_to_clipboard", return_value=True):
+        render(DIGEST, stdout=False, clipboard=True)
+    assert capsys.readouterr().err == ""
